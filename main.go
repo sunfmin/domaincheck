@@ -31,6 +31,10 @@ func main() {
 	words := strings.Split(string(fbytes), "\n")
 
 	for _, w := range words {
+		if strings.TrimSpace(w) == "" {
+			continue
+		}
+
 		py := pinyin.Convert(w)
 		pydowncase := strings.ToLower(py)
 		domain := pydowncase + ".com"
