@@ -28,7 +28,20 @@ func main() {
 		return
 	}
 
+	result := make(chan checkResult)
+	throttle := make(chan int, 60)
+
 	words := strings.Split(string(fbytes), "\n")
+	go func() {
+		for {
+			outr := <-result
+			if outr.available {
+				fmt.Printf("[Ohh Yeah] %s %s\n", outr.word, outr.domain)
+			} else {
+				fmt.Printf("\t\t\t %s %s %s\n", outr.word, outr.domain, outr.summary)
+			}
+		}
+	}()
 
 	for _, w := range words {
 		if strings.TrimSpace(w) == "" {
@@ -39,17 +52,24 @@ func main() {
 		pydowncase := strings.ToLower(py)
 		domain := pydowncase + ".com"
 
-		yes, summary := domainAvailable(domain)
-		if yes {
-			fmt.Printf("[Ohh Yeah] %s %s\n", w, domain)
-		} else {
-			fmt.Printf("\t\t\t %s %s %s\n", w, domain, summary)
-		}
+		throttle <- 1
+
+		go domainAvailable(w, domain, result, throttle)
 	}
+
 }
 
-func domainAvailable(domain string) (available bool, summary string) {
+type checkResult struct {
+	word      string
+	domain    string
+	available bool
+	summary   string
+}
+
+func domainAvailable(word string, domain string, in chan checkResult, throttle chan int) {
 	cmd := exec.Command("whois", domain)
+	var available bool
+	var summary string
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -62,8 +82,10 @@ func domainAvailable(domain string) (available bool, summary string) {
 	}
 
 	summary = firstLineOf(outputstring, "Registrant Name") + " => "
-	summary = summary + firstLineOf(outputstring, "Registrar Registration Expiration Date")
+	summary = summary + firstLineOf(outputstring, "Expiration Date")
 
+	in <- checkResult{word, domain, available, summary}
+	<-throttle
 	return
 }
 
