@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/axgle/pinyin"
+	"github.com/sunfmin/fanout"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -28,34 +29,38 @@ func main() {
 		return
 	}
 
-	result := make(chan checkResult)
-	throttle := make(chan int, 60)
-
 	words := strings.Split(string(fbytes), "\n")
-	go func() {
-		for {
-			outr := <-result
-			if outr.available {
-				fmt.Printf("[Ohh Yeah] %s %s\n", outr.word, outr.domain)
-			} else {
-				fmt.Printf("\t\t\t %s %s %s\n", outr.word, outr.domain, outr.summary)
-			}
-		}
-	}()
 
-	for _, w := range words {
-		if strings.TrimSpace(w) == "" {
-			continue
+	inputs := []interface{}{}
+	for _, word := range words {
+		inputs = append(inputs, word)
+	}
+
+	results, err2 := fanout.ParallelRun(60, func(input interface{}) (interface{}, error) {
+		word := input.(string)
+		if strings.TrimSpace(word) == "" {
+			return nil, nil
 		}
 
-		py := pinyin.Convert(w)
+		py := pinyin.Convert(word)
 		pydowncase := strings.ToLower(py)
 		domain := pydowncase + ".com"
+		outr, err := domainAvailable(word, domain)
 
-		throttle <- 1
+		if outr.available {
+			fmt.Printf("[Ohh Yeah] %s %s\n", outr.word, outr.domain)
+		} else {
+			fmt.Printf("\t\t\t %s %s %s\n", outr.word, outr.domain, outr.summary)
+		}
 
-		go domainAvailable(w, domain, result, throttle)
-	}
+		if err != nil {
+			fmt.Println("Error: ", err)
+		}
+
+		return outr, nil
+	}, inputs)
+
+	fmt.Println("Finished ", len(results), ", Error:", err2)
 
 }
 
@@ -66,26 +71,29 @@ type checkResult struct {
 	summary   string
 }
 
-func domainAvailable(word string, domain string, in chan checkResult, throttle chan int) {
-	cmd := exec.Command("whois", domain)
-	var available bool
+func domainAvailable(word string, domain string) (ch checkResult, err error) {
 	var summary string
+	var output []byte
 
-	output, err := cmd.Output()
+	ch.word = word
+	ch.domain = domain
+
+	cmd := exec.Command("whois", domain)
+	output, err = cmd.Output()
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
+
 	outputstring := string(output)
 	if strings.Contains(outputstring, "No match for \"") {
-		available = true
+		ch.available = true
 		return
 	}
 
 	summary = firstLineOf(outputstring, "Registrant Name") + " => "
 	summary = summary + firstLineOf(outputstring, "Expiration Date")
-
-	in <- checkResult{word, domain, available, summary}
-	<-throttle
+	ch.summary = summary
 	return
 }
 
