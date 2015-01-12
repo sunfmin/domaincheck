@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/axgle/pinyin"
+	"github.com/mozillazg/go-pinyin"
 	"github.com/sunfmin/fanout"
 	"io/ioutil"
 	"os"
@@ -12,6 +12,7 @@ import (
 )
 
 var file = flag.String("file", "", "每行一个词语的列表文本文件")
+var workers = flag.Int("workers", 60, "并发数")
 
 func main() {
 	flag.Parse()
@@ -36,26 +37,35 @@ func main() {
 		inputs = append(inputs, word)
 	}
 
-	results, err2 := fanout.ParallelRun(60, func(input interface{}) (interface{}, error) {
+	a := pinyin.NewArgs()
+
+	results, err2 := fanout.ParallelRun(*workers, func(input interface{}) (interface{}, error) {
 		word := input.(string)
 		if strings.TrimSpace(word) == "" {
 			return nil, nil
 		}
 
-		py := pinyin.Convert(word)
+		pya := pinyin.Pinyin(word, a)
+
+		py := ""
+		for _, pye := range pya {
+			py = py + pye[0]
+		}
+
 		pydowncase := strings.ToLower(py)
 		domain := pydowncase + ".com"
 		outr, err := domainAvailable(word, domain)
 
-		if outr.available {
-			fmt.Printf("[Ohh Yeah] %s %s\n", outr.word, outr.domain)
-		} else {
-			fmt.Printf("\t\t\t %s %s %s\n", outr.word, outr.domain, outr.summary)
-		}
-
 		if err != nil {
 			fmt.Println("Error: ", err)
+			return nil, nil
 		}
+
+		if outr.available {
+			fmt.Printf("[Ohh Yeah] %s %s\n", outr.word, outr.domain)
+		}
+
+		fmt.Printf("\t\t\t %s %s %s\n", outr.word, outr.domain, outr.summary)
 
 		return outr, nil
 	}, inputs)
